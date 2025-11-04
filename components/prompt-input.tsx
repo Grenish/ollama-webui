@@ -137,7 +137,7 @@ export function PromptInputWithActions({
           <PromptInputAction tooltip="Web Search">
             <Label htmlFor="">
               <Toggle className="rounded-full cursor-pointer">
-                <Globe /> Web Search
+                <Globe /> Search
               </Toggle>
             </Label>
           </PromptInputAction>
