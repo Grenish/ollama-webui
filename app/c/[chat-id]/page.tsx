@@ -302,66 +302,54 @@ export default function ChatPage() {
               </div>
             ) : (
               <>
-                {messages.map((msg, i) => {
-                  const isLastMessage = i === messages.length - 1;
-                  const isLastAssistant =
-                    isLastMessage && msg.role === "assistant";
+                {messages.map((msg, i) => (
+                  <div key={`${chatId}-msg-${i}`}>
+                    {msg.role === "assistant" && msg.reasoning && (
+                      <Reasoning
+                        className="w-full mb-4"
+                        isStreaming={false}
+                        duration={msg.reasoningDuration}
+                        defaultOpen={false}
+                      >
+                        <ReasoningTrigger />
+                        <ReasoningContent>{msg.reasoning}</ReasoningContent>
+                      </Reasoning>
+                    )}
+                    <Message from={msg.role}>
+                      <MessageContent>
+                        <Response>{msg.content}</Response>
+                      </MessageContent>
+                      <MessageAvatar
+                        name={msg.role === "user" ? "You" : "AI Assistant"}
+                        src={
+                          msg.role === "user"
+                            ? ""
+                            : "https://github.com/openai.png"
+                        }
+                      />
+                    </Message>
+                  </div>
+                ))}
 
-                  return (
-                    <div key={`${chatId}-msg-${i}`}>
-                      {isLastAssistant &&
-                        isReasoningStreaming &&
-                        reasoningText && (
-                          <Reasoning
-                            className="w-full max-w-4xl mb-4"
-                            isStreaming={isReasoningStreaming}
-                          >
-                            <ReasoningTrigger />
-                            <ReasoningContent>{reasoningText}</ReasoningContent>
-                          </Reasoning>
-                        )}
-
-                      {msg.role === "assistant" && msg.reasoning && (
-                        <Reasoning
-                          className="w-full mb-4"
-                          isStreaming={false}
-                          duration={msg.reasoningDuration}
-                          defaultOpen={false}
-                        >
-                          <ReasoningTrigger />
-                          <ReasoningContent>{msg.reasoning}</ReasoningContent>
-                        </Reasoning>
-                      )}
-                      <Message from={msg.role}>
-                        <MessageContent>
-                          <Response>{msg.content}</Response>
-                        </MessageContent>
-                        <MessageAvatar
-                          name={msg.role === "user" ? "You" : "AI Assistant"}
-                          src={
-                            msg.role === "user"
-                              ? ""
-                              : "https://github.com/openai.png"
-                          }
-                        />
-                      </Message>
-                    </div>
-                  );
-                })}
+                {isReasoningStreaming && reasoningText && (
+                  <Reasoning
+                    className="w-full max-w-4xl mb-4"
+                    isStreaming={isReasoningStreaming}
+                  >
+                    <ReasoningTrigger />
+                    <ReasoningContent>{reasoningText}</ReasoningContent>
+                  </Reasoning>
+                )}
 
                 {isWaitingForResponse &&
                   !isReasoningStreaming &&
                   (messages.length === 0 ||
                     messages[messages.length - 1].role !== "assistant" ||
                     !messages[messages.length - 1].content) && (
-                    <Message
-                      from="assistant"
-                      key="loading"
-                      className="flex items-center gap-2"
-                    >
-                      <div>
+                    <Message from="assistant" key="loading">
+                      <MessageContent className="bg-transparent!">
                         <Shimmer>Generating...</Shimmer>
-                      </div>
+                      </MessageContent>
                       <MessageAvatar
                         name="AI Assistant"
                         src="https://github.com/openai.png"
