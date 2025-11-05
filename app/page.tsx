@@ -28,8 +28,13 @@ export default function Home() {
     fetchModels();
   }, []);
 
-  const handleSendMessage = async (prompt: string, model: string) => {
-    if (!prompt.trim() || !model) return;
+  const handleSendMessage = async (
+    prompt: string,
+    model: string,
+    agentMode = false,
+    webSearchOnly = false,
+  ) => {
+    if (!prompt.trim() || (!model && !agentMode && !webSearchOnly)) return;
 
     setIsLoading(true);
 
@@ -42,6 +47,8 @@ export default function Home() {
       JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
+        agentMode,
+        webSearchOnly,
       }),
     );
 
