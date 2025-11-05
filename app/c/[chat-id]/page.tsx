@@ -18,16 +18,48 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { Response } from "@/components/ai-elements/response";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import {
+  InlineCitation,
+  InlineCitationText,
+  InlineCitationCard,
+  InlineCitationCardTrigger,
+  InlineCitationCardBody,
+  InlineCitationCarousel,
+  InlineCitationCarouselContent,
+  InlineCitationCarouselItem,
+  InlineCitationCarouselHeader,
+  InlineCitationCarouselIndex,
+  InlineCitationCarouselPrev,
+  InlineCitationCarouselNext,
+  InlineCitationSource,
+} from "@/components/ai-elements/inline-citation";
+import {
+  Task,
+  TaskTrigger,
+  TaskContent,
+  TaskItem,
+} from "@/components/ai-elements/task";
 import { PromptInputWithActions } from "@/components/prompt-input";
 import { MessageSquareIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
+import { useAgent, type AgentSource } from "@/lib/hooks/use-agent";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
   reasoningDuration?: number;
+  tool?: "RAG" | "WebSearch" | "Both";
+  sources?: AgentSource[];
+  isAgent?: boolean;
 };
 
 export default function ChatPage() {
@@ -40,9 +72,24 @@ export default function ChatPage() {
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const [isReasoningStreaming, setIsReasoningStreaming] = useState(false);
   const [reasoningText, setReasoningText] = useState("");
+  const [useAgentMode, setUseAgentMode] = useState(false);
+  const [agentProgressStatus, setAgentProgressStatus] = useState("");
+  const [agentProgressDetails, setAgentProgressDetails] = useState<string[]>(
+    [],
+  );
+  const [agentCurrentTool, setAgentCurrentTool] = useState<
+    "RAG" | "WebSearch" | "Both" | null
+  >(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const reasoningStartTimeRef = useRef<number | null>(null);
   const hasInitialized = useRef(false);
+  const {
+    sendAgentQuery,
+    isLoading: isAgentLoading,
+    currentTool,
+    progressStatus,
+    progressDetails,
+  } = useAgent();
 
   // Fetch models
   useEffect(() => {
@@ -271,7 +318,12 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = async (prompt: string, selectedModel: string) => {
+  const handleSendMessage = async (
+    prompt: string,
+    selectedModel: string,
+    agentMode = false,
+    webSearchOnly = false,
+  ) => {
     if (!prompt.trim()) return;
 
     const newMsg: ChatMessage = { role: "user", content: prompt };
@@ -281,10 +333,134 @@ export default function ChatPage() {
 
     sessionStorage.setItem(
       `chat-${chatId}`,
-      JSON.stringify({ model: selectedModel, messages: updated }),
+      JSON.stringify({
+        model: selectedModel,
+        messages: updated,
+        agentMode,
+        webSearchOnly,
+      }),
     );
 
-    await sendMessageToAPI(updated, selectedModel);
+    if (agentMode || webSearchOnly) {
+      await sendAgentMessage(prompt, webSearchOnly);
+    } else {
+      await sendMessageToAPI(updated, selectedModel);
+    }
+  };
+
+  const sendAgentMessage = async (query: string, webSearchOnly = false) => {
+    setIsLoading(true);
+    setIsWaitingForResponse(true);
+    setAgentProgressStatus("");
+    setAgentProgressDetails([]);
+    setAgentCurrentTool(null);
+
+    let assistantMessage = "";
+
+    try {
+      const response = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, stream: true, webSearchOnly }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Agent API error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let tool: "RAG" | "WebSearch" | "Both" | null = null;
+      let sources: AgentSource[] = [];
+      let currentEventType = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEventType = line.substring(7).trim();
+            continue;
+          }
+
+          if (line.startsWith("data: ")) {
+            const data = line.substring(6).trim();
+            if (!data || data === "{}") continue;
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (currentEventType === "tool") {
+                tool = parsed.tool;
+                setAgentCurrentTool(tool);
+              } else if (currentEventType === "progress") {
+                // Update progress state
+                setAgentProgressStatus(parsed.status || "");
+                setAgentProgressDetails(parsed.details || []);
+              } else if (currentEventType === "sources") {
+                sources = parsed.sources || [];
+              } else if (currentEventType === "message") {
+                const content = parsed.content || "";
+                if (content) {
+                  if (isWaitingForResponse) setIsWaitingForResponse(false);
+                  assistantMessage += content;
+                  setMessages((prev) => {
+                    const newMsgs = [...prev];
+                    const last = newMsgs[newMsgs.length - 1];
+                    if (last && last.role === "assistant" && last.isAgent) {
+                      last.content = assistantMessage;
+                    } else {
+                      newMsgs.push({
+                        role: "assistant",
+                        content: assistantMessage,
+                        isAgent: true,
+                      });
+                    }
+                    return newMsgs;
+                  });
+                }
+              } else if (currentEventType === "done") {
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const last = newMsgs[newMsgs.length - 1];
+                  if (last && last.role === "assistant" && last.isAgent) {
+                    last.sources = sources;
+                    if (tool) {
+                      last.tool = tool;
+                    }
+                  }
+                  return newMsgs;
+                });
+              }
+            } catch (err) {
+              console.error("Failed to parse SSE data:", err);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Agent message failed:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "⚠️ Agent failed. Please try again.",
+          isAgent: true,
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+      setIsWaitingForResponse(false);
+      setAgentProgressStatus("");
+      setAgentProgressDetails([]);
+      setAgentCurrentTool(null);
+    }
   };
 
   return (
@@ -315,17 +491,89 @@ export default function ChatPage() {
                         <ReasoningContent>{msg.reasoning}</ReasoningContent>
                       </Reasoning>
                     )}
+                    {msg.role === "assistant" && msg.isAgent && msg.tool && (
+                      <Tool className="mb-4 w-full" defaultOpen={true}>
+                        <ToolHeader
+                          title={`${msg.tool === "Both" ? "RAG + Web Search" : msg.tool}`}
+                          type="tool-call"
+                          state="output-available"
+                        />
+                        <ToolContent>
+                          <ToolInput
+                            input={{ query: messages[i - 1]?.content || "" }}
+                          />
+                          {msg.sources && msg.sources.length > 0 && (
+                            <ToolOutput
+                              output={{
+                                tool: msg.tool,
+                                sources: msg.sources.length,
+                                results: msg.sources.slice(0, 3).map((s) => ({
+                                  type: s.type,
+                                  title: s.title || "Document",
+                                  url: s.url,
+                                  score: s.score,
+                                })),
+                              }}
+                              errorText={undefined}
+                            />
+                          )}
+                        </ToolContent>
+                      </Tool>
+                    )}
                     <Message from={msg.role}>
                       <MessageContent>
-                        <Response>{msg.content}</Response>
+                        {msg.role === "assistant" &&
+                        msg.sources &&
+                        msg.sources.length > 0 ? (
+                          <div>
+                            <Response>{msg.content}</Response>
+                            <InlineCitation className="mt-4">
+                              <InlineCitationText>Sources:</InlineCitationText>
+                              <InlineCitationCard>
+                                <InlineCitationCardTrigger
+                                  sources={msg.sources
+                                    .filter((s) => s.url)
+                                    .map((s) => s.url!)}
+                                >
+                                  View {msg.sources.length} source
+                                  {msg.sources.length > 1 ? "s" : ""}
+                                </InlineCitationCardTrigger>
+                                <InlineCitationCardBody>
+                                  <InlineCitationCarousel>
+                                    <InlineCitationCarouselHeader>
+                                      <InlineCitationCarouselPrev />
+                                      <InlineCitationCarouselIndex />
+                                      <InlineCitationCarouselNext />
+                                    </InlineCitationCarouselHeader>
+                                    <InlineCitationCarouselContent>
+                                      {msg.sources.map((source, idx) => (
+                                        <InlineCitationCarouselItem key={idx}>
+                                          <InlineCitationSource
+                                            title={
+                                              source.title ||
+                                              `${source.type.toUpperCase()} Source ${idx + 1}`
+                                            }
+                                            url={source.url}
+                                            description={
+                                              source.content.slice(0, 200) +
+                                              "..."
+                                            }
+                                          />
+                                        </InlineCitationCarouselItem>
+                                      ))}
+                                    </InlineCitationCarouselContent>
+                                  </InlineCitationCarousel>
+                                </InlineCitationCardBody>
+                              </InlineCitationCard>
+                            </InlineCitation>
+                          </div>
+                        ) : (
+                          <Response>{msg.content}</Response>
+                        )}
                       </MessageContent>
                       <MessageAvatar
                         name={msg.role === "user" ? "You" : "AI Assistant"}
-                        src={
-                          msg.role === "user"
-                            ? ""
-                            : "https://github.com/openai.png"
-                        }
+                        src={msg.role === "user" ? "" : ""}
                       />
                     </Message>
                   </div>
@@ -348,7 +596,39 @@ export default function ChatPage() {
                     !messages[messages.length - 1].content) && (
                     <Message from="assistant" key="loading">
                       <MessageContent className="bg-transparent!">
-                        <Shimmer>Generating...</Shimmer>
+                        {agentProgressStatus ? (
+                          <Task className="w-full mb-4" defaultOpen={true}>
+                            <TaskTrigger title={agentProgressStatus} />
+                            <TaskContent>
+                              {agentCurrentTool && (
+                                <TaskItem className="font-medium text-foreground">
+                                  🔧 Tool selected:{" "}
+                                  {agentCurrentTool === "Both"
+                                    ? "RAG + Web Search"
+                                    : agentCurrentTool === "RAG"
+                                      ? "Local Knowledge Base"
+                                      : "Web Search"}
+                                </TaskItem>
+                              )}
+                              {agentProgressDetails &&
+                                agentProgressDetails.length > 0 && (
+                                  <div className="space-y-1 mt-2">
+                                    {agentProgressDetails.map((detail, idx) => (
+                                      <TaskItem
+                                        key={idx}
+                                        className="flex items-center gap-2"
+                                      >
+                                        <span className="text-primary">→</span>
+                                        <span>{detail}</span>
+                                      </TaskItem>
+                                    ))}
+                                  </div>
+                                )}
+                            </TaskContent>
+                          </Task>
+                        ) : (
+                          <Shimmer>Generating...</Shimmer>
+                        )}
                       </MessageContent>
                       <MessageAvatar
                         name="AI Assistant"
