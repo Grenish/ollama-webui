@@ -11,7 +11,6 @@ import { ArrowUp, Globe, Paperclip, Square, X } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
-import { Toggle } from "./ui/toggle";
 import {
   Select,
   SelectContent,
@@ -19,14 +18,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { Toggle } from "./ui/toggle";
 
 interface PromptInputWithActionsProps {
   models?: string[];
   selectedModel?: string;
   onModelChange?: (model: string) => void;
-  onSendMessage?: (prompt: string, model: string) => void;
+  onSendMessage?: (
+    prompt: string,
+    model: string,
+    agentMode?: boolean,
+    webSearchOnly?: boolean,
+  ) => void;
   isLoading?: boolean;
   onStopGeneration?: () => void;
+  enableAgent?: boolean;
+  enableWebSearch?: boolean;
 }
 
 export function PromptInputWithActions({
@@ -36,10 +43,14 @@ export function PromptInputWithActions({
   onSendMessage,
   isLoading: externalIsLoading,
   onStopGeneration,
+  enableAgent = true,
+  enableWebSearch = true,
 }: PromptInputWithActionsProps) {
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [currentModel, setCurrentModel] = useState(selectedModel);
+  const [agentMode, setAgentMode] = useState(false);
+  const [webSearchMode, setWebSearchMode] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   // Use external loading state if provided, otherwise manage internally
@@ -51,7 +62,10 @@ export function PromptInputWithActions({
   }, [selectedModel]);
 
   const handleSubmit = () => {
-    if ((input.trim() || files.length > 0) && currentModel) {
+    if (
+      (input.trim() || files.length > 0) &&
+      (currentModel || agentMode || webSearchMode)
+    ) {
       const messageToSend = input;
 
       // Clear input immediately for better UX
@@ -60,7 +74,7 @@ export function PromptInputWithActions({
 
       // Call the onSendMessage callback if provided
       if (onSendMessage) {
-        onSendMessage(messageToSend, currentModel);
+        onSendMessage(messageToSend, currentModel, agentMode, webSearchMode);
       }
     }
   };
@@ -134,13 +148,40 @@ export function PromptInputWithActions({
               <Paperclip className="text-primary size-5" />
             </Label>
           </PromptInputAction>
-          <PromptInputAction tooltip="Web Search">
-            <Label htmlFor="">
-              <Toggle className="rounded-full cursor-pointer">
-                <Globe /> Search
-              </Toggle>
-            </Label>
-          </PromptInputAction>
+          {enableAgent && (
+            <PromptInputAction tooltip="Enable RAG Agent">
+              <Button
+                variant={agentMode ? "default" : "outline"}
+                size="sm"
+                className="rounded-full gap-1.5"
+                onClick={() => {
+                  setAgentMode(!agentMode);
+                  if (!agentMode) setWebSearchMode(false);
+                }}
+                aria-label="Toggle agent mode"
+              >
+                <Globe className="size-4" />
+                <span>Agent</span>
+              </Button>
+            </PromptInputAction>
+          )}
+          {enableWebSearch && (
+            <PromptInputAction tooltip="Web Search Only">
+              <Button
+                variant={webSearchMode ? "default" : "outline"}
+                size="sm"
+                className="rounded-full gap-1.5"
+                onClick={() => {
+                  setWebSearchMode(!webSearchMode);
+                  if (!webSearchMode) setAgentMode(false);
+                }}
+                aria-label="Toggle web search mode"
+              >
+                <Globe className="size-4" />
+                <span>Web</span>
+              </Button>
+            </PromptInputAction>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -174,7 +215,8 @@ export function PromptInputWithActions({
               onClick={isLoading ? onStopGeneration : handleSubmit}
               disabled={
                 !isLoading &&
-                (!currentModel || (!input.trim() && files.length === 0))
+                ((!currentModel && !agentMode && !webSearchMode) ||
+                  (!input.trim() && files.length === 0))
               }
             >
               {isLoading ? (
