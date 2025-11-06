@@ -10,6 +10,7 @@ type AgentRequestBody = {
   query: string;
   stream?: boolean;
   webSearchOnly?: boolean;
+  model?: string;
 };
 
 const CONFIG = {
@@ -131,6 +132,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // Use user-provided model or fall back to config
+    const generateModel = body.model || CONFIG.OLLAMA.GENERATE_MODEL;
+
     const agent = await getAgent();
 
     // Non-streaming response
@@ -210,49 +214,52 @@ export async function POST(req: Request) {
             ]);
 
             // Format web results through LLM for better output
-            const answerPrompt = `You are an intelligent, helpful AI assistant. Your task is to provide accurate, comprehensive answers based on web search results.
+            const answerPrompt = `You are a helpful AI assistant. Provide a comprehensive answer based on the web search results below.
 
-CONTEXT SOURCE: web search
+**INSTRUCTIONS:**
+- Answer the user's question directly and thoroughly
+- Use ONLY information from the provided web search results
+- Structure your response with clear paragraphs
+- Be concise but complete
+- Use proper Markdown formatting (headings, lists, bold, etc.)
+- Maintain a professional, friendly tone
 
-INSTRUCTIONS:
-1. Answer the user's question directly and thoroughly
-2. Use ONLY information from the provided web search results
-3. Structure your response with clear paragraphs and formatting
-4. Be concise but complete
-5. If multiple sources conflict, mention the discrepancy
-6. Maintain a professional, friendly tone
-7. Use proper Markdown formatting (headings, lists, bold, etc.) when appropriate
-
-WEB SEARCH RESULTS:
+**WEB SEARCH RESULTS:**
 ${webResult.content}
 
-USER QUESTION:
+**USER QUESTION:**
 ${body.query}
 
-COMPREHENSIVE ANSWER:`;
+**YOUR ANSWER:**`;
 
-            const answer = await agent["ollama"].generate(
-              CONFIG.OLLAMA.GENERATE_MODEL,
+            progressCallback("Generating response", [
+              "Analyzing search results",
+              "Formulating comprehensive answer",
+            ]);
+
+            // Use streaming generation for better UX
+            let fullAnswer = "";
+            await agent["ollama"].generateStream(
+              generateModel,
               answerPrompt,
+              {
+                onToken: (token: string) => {
+                  fullAnswer += token;
+                  controller.enqueue(
+                    encoder.encode(
+                      `event: message\ndata: ${JSON.stringify({ content: token })}\n\n`,
+                    ),
+                  );
+                },
+                onComplete: () => {
+                  console.log("Web search answer generation complete");
+                },
+                onError: (error: Error) => {
+                  console.error("Generation error:", error);
+                },
+              },
               0.7,
             );
-
-            // Post-process the answer
-            const processedAnswer = answer
-              .replace(/^(COMPREHENSIVE ANSWER:|RESPONSE:|ANSWER:)/i, "")
-              .trim();
-
-            // Stream the formatted answer in complete chunks
-            const words = processedAnswer.split(/\s+/);
-            for (let i = 0; i < words.length; i += 5) {
-              const chunk = words.slice(i, i + 5).join(" ") + " ";
-              controller.enqueue(
-                encoder.encode(
-                  `event: message\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
-                ),
-              );
-              await new Promise((resolve) => setTimeout(resolve, 20));
-            }
 
             controller.enqueue(
               encoder.encode(
@@ -285,7 +292,11 @@ COMPREHENSIVE ANSWER:`;
           );
 
           // Get the answer with progress updates
-          const result = await agent.answer(body.query, progressCallback);
+          const result = await agent.answer(
+            body.query,
+            progressCallback,
+            generateModel,
+          );
 
           // Send sources event
           if (result.sources.length > 0) {
@@ -296,17 +307,24 @@ COMPREHENSIVE ANSWER:`;
             );
           }
 
-          // Send answer in chunks (simulate streaming)
-          const words = result.answer.split(/\s+/);
-          for (let i = 0; i < words.length; i += 5) {
-            const chunk = words.slice(i, i + 5).join(" ") + " ";
+          progressCallback("Generating response", [
+            "Processing retrieved information",
+            "Crafting comprehensive answer",
+          ]);
+
+          // Stream the answer character by character for smoother display
+          const answer = result.answer;
+          const chunkSize = 3; // Characters per chunk for smoother streaming
+
+          for (let i = 0; i < answer.length; i += chunkSize) {
+            const chunk = answer.slice(i, i + chunkSize);
             controller.enqueue(
               encoder.encode(
                 `event: message\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
               ),
             );
-            // Small delay to simulate streaming
-            await new Promise((resolve) => setTimeout(resolve, 20));
+            // Small delay for smoother streaming effect
+            await new Promise((resolve) => setTimeout(resolve, 15));
           }
 
           // Send completion event
