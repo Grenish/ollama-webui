@@ -47,6 +47,15 @@ import {
   TaskItem,
 } from "@/components/ai-elements/task";
 import { PromptInputWithActions } from "@/components/prompt-input";
+import { ResponseMetadataHoverCard } from "@/components/response-metadata-hover-card";
+import {
+  Branch,
+  BranchMessages,
+  BranchSelector,
+  BranchPrevious,
+  BranchNext,
+  BranchPage,
+} from "@/components/ai-elements/branch";
 import { MessageSquareIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -60,6 +69,29 @@ type ChatMessage = {
   tool?: "RAG" | "WebSearch" | "Both";
   sources?: AgentSource[];
   isAgent?: boolean;
+  metadata?: {
+    modelName?: string;
+    totalDuration?: number;
+    loadDuration?: number;
+    promptEvalCount?: number;
+    promptEvalDuration?: number;
+    evalCount?: number;
+    evalDuration?: number;
+    timestamp?: string;
+    inferenceLocation?: "local" | "cloud";
+    temperature?: number;
+    topP?: number;
+    maxTokens?: number;
+    contextWindow?: number;
+  };
+  branches?: Array<{
+    content: string;
+    reasoning?: string;
+    reasoningDuration?: number;
+    metadata?: ChatMessage["metadata"];
+    sources?: AgentSource[];
+    tool?: "RAG" | "WebSearch" | "Both";
+  }>;
 };
 
 export default function ChatPage() {
@@ -167,6 +199,11 @@ export default function ChatPage() {
       let assistantMessage = "";
       let accumulatedThinking = "";
       let currentEventType = "";
+      let messageMetadata: ChatMessage["metadata"] = {
+        modelName: currentModel,
+        timestamp: new Date().toISOString(),
+        inferenceLocation: "local",
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -227,10 +264,26 @@ export default function ChatPage() {
                     const newMsgs = [...prev];
                     const last = newMsgs[newMsgs.length - 1];
                     if (last && last.role === "assistant") {
-                      last.content = assistantMessage;
-                      if (accumulatedThinking && !last.reasoning) {
-                        last.reasoning = accumulatedThinking;
-                        last.reasoningDuration = duration;
+                      // Check if we're regenerating (branches exist)
+                      if (last.branches && last.branches.length > 0) {
+                        // Update the last branch
+                        const lastBranchIdx = last.branches.length - 1;
+                        last.branches[lastBranchIdx].content = assistantMessage;
+                        if (
+                          accumulatedThinking &&
+                          !last.branches[lastBranchIdx].reasoning
+                        ) {
+                          last.branches[lastBranchIdx].reasoning =
+                            accumulatedThinking;
+                          last.branches[lastBranchIdx].reasoningDuration =
+                            duration;
+                        }
+                      } else {
+                        last.content = assistantMessage;
+                        if (accumulatedThinking && !last.reasoning) {
+                          last.reasoning = accumulatedThinking;
+                          last.reasoningDuration = duration;
+                        }
                       }
                     } else {
                       newMsgs.push({
@@ -248,6 +301,17 @@ export default function ChatPage() {
 
               // Handle meta events (completion)
               if (currentEventType === "meta" && parsed.done === true) {
+                // Capture metadata from the completion event
+                messageMetadata = {
+                  ...messageMetadata,
+                  totalDuration: parsed.total_duration,
+                  loadDuration: parsed.load_duration,
+                  promptEvalCount: parsed.prompt_eval_count,
+                  promptEvalDuration: parsed.prompt_eval_duration,
+                  evalCount: parsed.eval_count,
+                  evalDuration: parsed.eval_duration,
+                };
+
                 if (accumulatedThinking) {
                   let duration: number | undefined;
                   if (reasoningStartTimeRef.current) {
@@ -263,9 +327,36 @@ export default function ChatPage() {
                   setMessages((prev) => {
                     const newMsgs = [...prev];
                     const last = newMsgs[newMsgs.length - 1];
-                    if (last && last.role === "assistant" && !last.reasoning) {
-                      last.reasoning = accumulatedThinking;
-                      last.reasoningDuration = duration;
+                    if (last && last.role === "assistant") {
+                      if (last.branches && last.branches.length > 0) {
+                        const lastBranchIdx = last.branches.length - 1;
+                        if (!last.branches[lastBranchIdx].reasoning) {
+                          last.branches[lastBranchIdx].reasoning =
+                            accumulatedThinking;
+                          last.branches[lastBranchIdx].reasoningDuration =
+                            duration;
+                          last.branches[lastBranchIdx].metadata =
+                            messageMetadata;
+                        }
+                      } else if (!last.reasoning) {
+                        last.reasoning = accumulatedThinking;
+                        last.reasoningDuration = duration;
+                        last.metadata = messageMetadata;
+                      }
+                    }
+                    return newMsgs;
+                  });
+                } else {
+                  setMessages((prev) => {
+                    const newMsgs = [...prev];
+                    const last = newMsgs[newMsgs.length - 1];
+                    if (last && last.role === "assistant") {
+                      if (last.branches && last.branches.length > 0) {
+                        const lastBranchIdx = last.branches.length - 1;
+                        last.branches[lastBranchIdx].metadata = messageMetadata;
+                      } else {
+                        last.metadata = messageMetadata;
+                      }
                     }
                     return newMsgs;
                   });
@@ -326,29 +417,65 @@ export default function ChatPage() {
   ) => {
     if (!prompt.trim()) return;
 
-    const newMsg: ChatMessage = { role: "user", content: prompt };
-    const updated = [...messages, newMsg];
-    setMessages(updated);
-    setModel(selectedModel);
+    // Check if we're regenerating (last message is assistant with branches initialized)
+    const lastMsg = messages[messages.length - 1];
+    const isRegenerating =
+      lastMsg && lastMsg.role === "assistant" && lastMsg.branches;
 
-    sessionStorage.setItem(
-      `chat-${chatId}`,
-      JSON.stringify({
-        model: selectedModel,
-        messages: updated,
-        agentMode,
-        webSearchOnly,
-      }),
-    );
+    if (isRegenerating) {
+      // Add a new branch to the existing assistant message
+      setMessages((prev) => {
+        const newMsgs = [...prev];
+        const last = newMsgs[newMsgs.length - 1];
+        if (last && last.role === "assistant" && last.branches) {
+          // Add new empty branch that will be populated
+          last.branches.push({
+            content: "",
+            metadata: {
+              modelName: selectedModel,
+              timestamp: new Date().toISOString(),
+              inferenceLocation: "local",
+            },
+          });
+        }
+        return newMsgs;
+      });
 
-    if (agentMode || webSearchOnly) {
-      await sendAgentMessage(prompt, webSearchOnly);
+      if (agentMode || webSearchOnly) {
+        await sendAgentMessage(prompt, webSearchOnly, selectedModel);
+      } else {
+        await sendMessageToAPI(messages, selectedModel);
+      }
     } else {
-      await sendMessageToAPI(updated, selectedModel);
+      // Normal new message flow
+      const newMsg: ChatMessage = { role: "user", content: prompt };
+      const updated = [...messages, newMsg];
+      setMessages(updated);
+      setModel(selectedModel);
+
+      sessionStorage.setItem(
+        `chat-${chatId}`,
+        JSON.stringify({
+          model: selectedModel,
+          messages: updated,
+          agentMode,
+          webSearchOnly,
+        }),
+      );
+
+      if (agentMode || webSearchOnly) {
+        await sendAgentMessage(prompt, webSearchOnly, selectedModel);
+      } else {
+        await sendMessageToAPI(updated, selectedModel);
+      }
     }
   };
 
-  const sendAgentMessage = async (query: string, webSearchOnly = false) => {
+  const sendAgentMessage = async (
+    query: string,
+    webSearchOnly = false,
+    selectedModel = "",
+  ) => {
     setIsLoading(true);
     setIsWaitingForResponse(true);
     setAgentProgressStatus("");
@@ -356,12 +483,22 @@ export default function ChatPage() {
     setAgentCurrentTool(null);
 
     let assistantMessage = "";
+    let messageMetadata: ChatMessage["metadata"] = {
+      modelName: selectedModel || model,
+      timestamp: new Date().toISOString(),
+      inferenceLocation: "local",
+    };
 
     try {
       const response = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, stream: true, webSearchOnly }),
+        body: JSON.stringify({
+          query,
+          stream: true,
+          webSearchOnly,
+          model: selectedModel,
+        }),
       });
 
       if (!response.ok) {
@@ -414,7 +551,13 @@ export default function ChatPage() {
                     const newMsgs = [...prev];
                     const last = newMsgs[newMsgs.length - 1];
                     if (last && last.role === "assistant" && last.isAgent) {
-                      last.content = assistantMessage;
+                      // Check if we're regenerating (branches exist)
+                      if (last.branches && last.branches.length > 0) {
+                        const lastBranchIdx = last.branches.length - 1;
+                        last.branches[lastBranchIdx].content = assistantMessage;
+                      } else {
+                        last.content = assistantMessage;
+                      }
                     } else {
                       newMsgs.push({
                         role: "assistant",
@@ -430,9 +573,19 @@ export default function ChatPage() {
                   const newMsgs = [...prev];
                   const last = newMsgs[newMsgs.length - 1];
                   if (last && last.role === "assistant" && last.isAgent) {
-                    last.sources = sources;
-                    if (tool) {
-                      last.tool = tool;
+                    if (last.branches && last.branches.length > 0) {
+                      const lastBranchIdx = last.branches.length - 1;
+                      last.branches[lastBranchIdx].sources = sources;
+                      if (tool) {
+                        last.branches[lastBranchIdx].tool = tool;
+                      }
+                      last.branches[lastBranchIdx].metadata = messageMetadata;
+                    } else {
+                      last.sources = sources;
+                      if (tool) {
+                        last.tool = tool;
+                      }
+                      last.metadata = messageMetadata;
                     }
                   }
                   return newMsgs;
@@ -491,91 +644,354 @@ export default function ChatPage() {
                         <ReasoningContent>{msg.reasoning}</ReasoningContent>
                       </Reasoning>
                     )}
-                    {msg.role === "assistant" && msg.isAgent && msg.tool && (
-                      <Tool className="mb-4 w-full" defaultOpen={true}>
-                        <ToolHeader
-                          title={`${msg.tool === "Both" ? "RAG + Web Search" : msg.tool}`}
-                          type="tool-call"
-                          state="output-available"
-                        />
-                        <ToolContent>
-                          <ToolInput
-                            input={{ query: messages[i - 1]?.content || "" }}
-                          />
-                          {msg.sources && msg.sources.length > 0 && (
-                            <ToolOutput
-                              output={{
-                                tool: msg.tool,
-                                sources: msg.sources.length,
-                                results: msg.sources.slice(0, 3).map((s) => ({
-                                  type: s.type,
-                                  title: s.title || "Document",
-                                  url: s.url,
-                                  score: s.score,
-                                })),
-                              }}
-                              errorText={undefined}
-                            />
-                          )}
-                        </ToolContent>
-                      </Tool>
-                    )}
-                    <Message from={msg.role}>
-                      <MessageContent>
-                        {msg.role === "assistant" &&
-                        msg.sources &&
-                        msg.sources.length > 0 ? (
-                          <div>
-                            <Response>{msg.content}</Response>
-                            <InlineCitation className="mt-4">
-                              <InlineCitationText>Sources:</InlineCitationText>
-                              <InlineCitationCard>
-                                <InlineCitationCardTrigger
-                                  sources={msg.sources
-                                    .filter((s) => s.url)
-                                    .map((s) => s.url!)}
+                    {msg.role === "assistant" &&
+                    (msg.branches ? msg.branches.length : 0) > 1 ? (
+                      <Branch className="w-full mb-4">
+                        <BranchMessages>
+                          {msg.branches!.map((branch, branchIdx) => (
+                            <div key={branchIdx}>
+                              {msg.isAgent && branch.tool && (
+                                <Tool
+                                  className="mb-4 w-full"
+                                  defaultOpen={true}
                                 >
-                                  View {msg.sources.length} source
-                                  {msg.sources.length > 1 ? "s" : ""}
-                                </InlineCitationCardTrigger>
-                                <InlineCitationCardBody>
-                                  <InlineCitationCarousel>
-                                    <InlineCitationCarouselHeader>
-                                      <InlineCitationCarouselPrev />
-                                      <InlineCitationCarouselIndex />
-                                      <InlineCitationCarouselNext />
-                                    </InlineCitationCarouselHeader>
-                                    <InlineCitationCarouselContent>
-                                      {msg.sources.map((source, idx) => (
-                                        <InlineCitationCarouselItem key={idx}>
-                                          <InlineCitationSource
-                                            title={
-                                              source.title ||
-                                              `${source.type.toUpperCase()} Source ${idx + 1}`
+                                  <ToolHeader
+                                    title={`${branch.tool === "Both" ? "RAG + Web Search" : branch.tool}`}
+                                    type="tool-call"
+                                    state="output-available"
+                                  />
+                                  <ToolContent>
+                                    <ToolInput
+                                      input={{
+                                        query: messages[i - 1]?.content || "",
+                                      }}
+                                    />
+                                    {branch.sources &&
+                                      branch.sources.length > 0 && (
+                                        <ToolOutput
+                                          output={{
+                                            tool: branch.tool,
+                                            sources: branch.sources.length,
+                                            results: branch.sources
+                                              .slice(0, 3)
+                                              .map((s) => ({
+                                                type: s.type,
+                                                title: s.title || "Document",
+                                                url: s.url,
+                                                score: s.score,
+                                              })),
+                                          }}
+                                          errorText={undefined}
+                                        />
+                                      )}
+                                  </ToolContent>
+                                </Tool>
+                              )}
+                              <Message from="assistant">
+                                <MessageContent>
+                                  {branch.sources &&
+                                  branch.sources.length > 0 ? (
+                                    <div>
+                                      {branch.metadata ? (
+                                        <ResponseMetadataHoverCard
+                                          metadata={branch.metadata}
+                                          responseContent={branch.content}
+                                          onRegenerate={() => {
+                                            const userMsg = messages[i - 1];
+                                            if (
+                                              userMsg &&
+                                              userMsg.role === "user"
+                                            ) {
+                                              handleSendMessage(
+                                                userMsg.content,
+                                                branch.metadata?.modelName ||
+                                                  model,
+                                                msg.isAgent,
+                                                branch.tool === "WebSearch",
+                                              );
                                             }
-                                            url={source.url}
-                                            description={
-                                              source.content.slice(0, 200) +
-                                              "..."
+                                          }}
+                                        >
+                                          <Response>{branch.content}</Response>
+                                        </ResponseMetadataHoverCard>
+                                      ) : (
+                                        <Response>{branch.content}</Response>
+                                      )}
+                                      <InlineCitation className="mt-4">
+                                        <InlineCitationText>
+                                          Sources:
+                                        </InlineCitationText>
+                                        <InlineCitationCard>
+                                          <InlineCitationCardTrigger
+                                            sources={branch.sources
+                                              .filter((s) => s.url)
+                                              .map((s) => s.url!)}
+                                          >
+                                            View {branch.sources.length} source
+                                            {branch.sources.length > 1
+                                              ? "s"
+                                              : ""}
+                                          </InlineCitationCardTrigger>
+                                          <InlineCitationCardBody>
+                                            <InlineCitationCarousel>
+                                              <InlineCitationCarouselHeader>
+                                                <InlineCitationCarouselPrev />
+                                                <InlineCitationCarouselIndex />
+                                                <InlineCitationCarouselNext />
+                                              </InlineCitationCarouselHeader>
+                                              <InlineCitationCarouselContent>
+                                                {branch.sources.map(
+                                                  (source, idx) => (
+                                                    <InlineCitationCarouselItem
+                                                      key={idx}
+                                                    >
+                                                      <InlineCitationSource
+                                                        title={
+                                                          source.title ||
+                                                          `${source.type.toUpperCase()} Source ${idx + 1}`
+                                                        }
+                                                        url={source.url}
+                                                        description={
+                                                          source.content.slice(
+                                                            0,
+                                                            200,
+                                                          ) + "..."
+                                                        }
+                                                      />
+                                                    </InlineCitationCarouselItem>
+                                                  ),
+                                                )}
+                                              </InlineCitationCarouselContent>
+                                            </InlineCitationCarousel>
+                                          </InlineCitationCardBody>
+                                        </InlineCitationCard>
+                                      </InlineCitation>
+                                    </div>
+                                  ) : branch.metadata ? (
+                                    <ResponseMetadataHoverCard
+                                      metadata={branch.metadata}
+                                      responseContent={branch.content}
+                                      onRegenerate={() => {
+                                        const userMsg = messages[i - 1];
+                                        if (
+                                          userMsg &&
+                                          userMsg.role === "user"
+                                        ) {
+                                          handleSendMessage(
+                                            userMsg.content,
+                                            branch.metadata?.modelName || model,
+                                            msg.isAgent,
+                                            branch.tool === "WebSearch",
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <Response>{branch.content}</Response>
+                                    </ResponseMetadataHoverCard>
+                                  ) : (
+                                    <Response>{branch.content}</Response>
+                                  )}
+                                </MessageContent>
+                                <MessageAvatar name="AI Assistant" src="" />
+                              </Message>
+                            </div>
+                          ))}
+                        </BranchMessages>
+                        <BranchSelector from="assistant">
+                          <BranchPrevious />
+                          <BranchPage />
+                          <BranchNext />
+                        </BranchSelector>
+                      </Branch>
+                    ) : (
+                      <>
+                        {msg.role === "assistant" &&
+                          msg.isAgent &&
+                          msg.tool && (
+                            <Tool className="mb-4 w-full" defaultOpen={true}>
+                              <ToolHeader
+                                title={`${msg.tool === "Both" ? "RAG + Web Search" : msg.tool}`}
+                                type="tool-call"
+                                state="output-available"
+                              />
+                              <ToolContent>
+                                <ToolInput
+                                  input={{
+                                    query: messages[i - 1]?.content || "",
+                                  }}
+                                />
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <ToolOutput
+                                    output={{
+                                      tool: msg.tool,
+                                      sources: msg.sources.length,
+                                      results: msg.sources
+                                        .slice(0, 3)
+                                        .map((s) => ({
+                                          type: s.type,
+                                          title: s.title || "Document",
+                                          url: s.url,
+                                          score: s.score,
+                                        })),
+                                    }}
+                                    errorText={undefined}
+                                  />
+                                )}
+                              </ToolContent>
+                            </Tool>
+                          )}
+                        <Message from={msg.role}>
+                          <MessageContent>
+                            {msg.role === "assistant" &&
+                            msg.sources &&
+                            msg.sources.length > 0 ? (
+                              <div>
+                                {msg.metadata ? (
+                                  <ResponseMetadataHoverCard
+                                    metadata={msg.metadata}
+                                    responseContent={msg.content}
+                                    onRegenerate={() => {
+                                      const userMsg = messages[i - 1];
+                                      if (userMsg && userMsg.role === "user") {
+                                        // Add new branch instead of replacing
+                                        setMessages((prev) => {
+                                          const newMsgs = [...prev];
+                                          const assistantMsg = newMsgs[i];
+                                          if (
+                                            assistantMsg &&
+                                            assistantMsg.role === "assistant"
+                                          ) {
+                                            // Initialize branches if not exists
+                                            if (!assistantMsg.branches) {
+                                              assistantMsg.branches = [
+                                                {
+                                                  content: assistantMsg.content,
+                                                  metadata:
+                                                    assistantMsg.metadata,
+                                                  sources: assistantMsg.sources,
+                                                  tool: assistantMsg.tool,
+                                                  reasoning:
+                                                    assistantMsg.reasoning,
+                                                  reasoningDuration:
+                                                    assistantMsg.reasoningDuration,
+                                                },
+                                              ];
                                             }
-                                          />
-                                        </InlineCitationCarouselItem>
-                                      ))}
-                                    </InlineCitationCarouselContent>
-                                  </InlineCitationCarousel>
-                                </InlineCitationCardBody>
-                              </InlineCitationCard>
-                            </InlineCitation>
-                          </div>
-                        ) : (
-                          <Response>{msg.content}</Response>
-                        )}
-                      </MessageContent>
-                      <MessageAvatar
-                        name={msg.role === "user" ? "You" : "AI Assistant"}
-                        src={msg.role === "user" ? "" : ""}
-                      />
-                    </Message>
+                                          }
+                                          return newMsgs;
+                                        });
+                                        handleSendMessage(
+                                          userMsg.content,
+                                          msg.metadata?.modelName || model,
+                                          msg.isAgent,
+                                          msg.tool === "WebSearch",
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    <Response>{msg.content}</Response>
+                                  </ResponseMetadataHoverCard>
+                                ) : (
+                                  <Response>{msg.content}</Response>
+                                )}
+                                <InlineCitation className="mt-4">
+                                  <InlineCitationText>
+                                    Sources:
+                                  </InlineCitationText>
+                                  <InlineCitationCard>
+                                    <InlineCitationCardTrigger
+                                      sources={msg.sources
+                                        .filter((s) => s.url)
+                                        .map((s) => s.url!)}
+                                    >
+                                      View {msg.sources.length} source
+                                      {msg.sources.length > 1 ? "s" : ""}
+                                    </InlineCitationCardTrigger>
+                                    <InlineCitationCardBody>
+                                      <InlineCitationCarousel>
+                                        <InlineCitationCarouselHeader>
+                                          <InlineCitationCarouselPrev />
+                                          <InlineCitationCarouselIndex />
+                                          <InlineCitationCarouselNext />
+                                        </InlineCitationCarouselHeader>
+                                        <InlineCitationCarouselContent>
+                                          {msg.sources.map((source, idx) => (
+                                            <InlineCitationCarouselItem
+                                              key={idx}
+                                            >
+                                              <InlineCitationSource
+                                                title={
+                                                  source.title ||
+                                                  `${source.type.toUpperCase()} Source ${idx + 1}`
+                                                }
+                                                url={source.url}
+                                                description={
+                                                  source.content.slice(0, 200) +
+                                                  "..."
+                                                }
+                                              />
+                                            </InlineCitationCarouselItem>
+                                          ))}
+                                        </InlineCitationCarouselContent>
+                                      </InlineCitationCarousel>
+                                    </InlineCitationCardBody>
+                                  </InlineCitationCard>
+                                </InlineCitation>
+                              </div>
+                            ) : msg.role === "assistant" && msg.metadata ? (
+                              <ResponseMetadataHoverCard
+                                metadata={msg.metadata}
+                                responseContent={msg.content}
+                                onRegenerate={() => {
+                                  const userMsg = messages[i - 1];
+                                  if (userMsg && userMsg.role === "user") {
+                                    // Add new branch instead of replacing
+                                    setMessages((prev) => {
+                                      const newMsgs = [...prev];
+                                      const assistantMsg = newMsgs[i];
+                                      if (
+                                        assistantMsg &&
+                                        assistantMsg.role === "assistant"
+                                      ) {
+                                        // Initialize branches if not exists
+                                        if (!assistantMsg.branches) {
+                                          assistantMsg.branches = [
+                                            {
+                                              content: assistantMsg.content,
+                                              metadata: assistantMsg.metadata,
+                                              sources: assistantMsg.sources,
+                                              tool: assistantMsg.tool,
+                                              reasoning: assistantMsg.reasoning,
+                                              reasoningDuration:
+                                                assistantMsg.reasoningDuration,
+                                            },
+                                          ];
+                                        }
+                                      }
+                                      return newMsgs;
+                                    });
+                                    handleSendMessage(
+                                      userMsg.content,
+                                      msg.metadata?.modelName || model,
+                                      msg.isAgent,
+                                      msg.tool === "WebSearch",
+                                    );
+                                  }
+                                }}
+                              >
+                                <Response>{msg.content}</Response>
+                              </ResponseMetadataHoverCard>
+                            ) : (
+                              <Response>{msg.content}</Response>
+                            )}
+                          </MessageContent>
+                          <MessageAvatar
+                            name={msg.role === "user" ? "You" : "AI Assistant"}
+                            src={msg.role === "user" ? "" : ""}
+                          />
+                        </Message>
+                      </>
+                    )}
                   </div>
                 ))}
 
@@ -602,7 +1018,7 @@ export default function ChatPage() {
                             <TaskContent>
                               {agentCurrentTool && (
                                 <TaskItem className="font-medium text-foreground">
-                                  🔧 Tool selected:{" "}
+                                  Tool selected:{" "}
                                   {agentCurrentTool === "Both"
                                     ? "RAG + Web Search"
                                     : agentCurrentTool === "RAG"
@@ -618,7 +1034,6 @@ export default function ChatPage() {
                                         key={idx}
                                         className="flex items-center gap-2"
                                       >
-                                        <span className="text-primary">→</span>
                                         <span>{detail}</span>
                                       </TaskItem>
                                     ))}
@@ -630,10 +1045,7 @@ export default function ChatPage() {
                           <Shimmer>Generating...</Shimmer>
                         )}
                       </MessageContent>
-                      <MessageAvatar
-                        name="AI Assistant"
-                        src="https://github.com/openai.png"
-                      />
+                      <MessageAvatar name="AI Assistant" src="" />
                     </Message>
                   )}
               </>
