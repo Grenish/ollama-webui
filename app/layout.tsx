@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeSwitcher } from "@/components/theme-switch";
 
 const Mont = Montserrat({
   weight: ["400", "500", "600", "700"],
@@ -23,13 +24,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head />
-      <body className={`${Mont.className} antialiased`}>
+      <body className={`${Mont.className} antialiased relative`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >
+          <ThemeSwitcher className="fixed top-2 right-5" />
           {children}
         </ThemeProvider>
       </body>

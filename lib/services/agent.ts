@@ -217,6 +217,7 @@ Analyze the question and respond with JSON:`;
   async answer(
     query: string,
     progressCallback?: (status: string, details?: string[]) => void,
+    generateModel?: string,
   ): Promise<AgentAnswer> {
     const tool = await this.decideTool(query);
     console.log(`🧠 Selected Tool: ${tool}`);
@@ -364,7 +365,7 @@ ${query}
 COMPREHENSIVE ANSWER:`;
 
     const answer = await this.ollama.generate(
-      this.config.generateModel,
+      generateModel || this.config.generateModel,
       answerPrompt,
       0.7,
     );

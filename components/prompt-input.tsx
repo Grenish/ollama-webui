@@ -11,14 +11,8 @@ import { ArrowUp, Globe, Paperclip, Square, X } from "lucide-react";
 import React, { useRef, useState } from "react";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import { Toggle } from "./ui/toggle";
+import { CompactModelSelector } from "./model-selector";
+import { hasCapability } from "@/public/modelCapabilities";
 
 interface PromptInputWithActionsProps {
   models?: string[];
@@ -60,6 +54,11 @@ export function PromptInputWithActions({
   React.useEffect(() => {
     setCurrentModel(selectedModel);
   }, [selectedModel]);
+
+  // Check if current model supports tool calling
+  const modelSupportsTools = React.useMemo(() => {
+    return currentModel ? hasCapability(currentModel, "tool") : false;
+  }, [currentModel]);
 
   const handleSubmit = () => {
     if (
@@ -129,7 +128,10 @@ export function PromptInputWithActions({
         </div>
       )}
 
-      <PromptInputTextarea placeholder="Ask me anything..." />
+      <PromptInputTextarea
+        placeholder="Ask me anything..."
+        className="text-foreground"
+      />
 
       <PromptInputActions className="flex items-center justify-between gap-2 pt-2">
         <div className="flex items-center gap-2">
@@ -148,7 +150,7 @@ export function PromptInputWithActions({
               <Paperclip className="text-primary size-5" />
             </Label>
           </PromptInputAction>
-          {enableAgent && (
+          {enableAgent && modelSupportsTools && (
             <PromptInputAction tooltip="Enable RAG Agent">
               <Button
                 variant={agentMode ? "default" : "outline"}
@@ -165,7 +167,7 @@ export function PromptInputWithActions({
               </Button>
             </PromptInputAction>
           )}
-          {enableWebSearch && (
+          {enableWebSearch && modelSupportsTools && (
             <PromptInputAction tooltip="Web Search Only">
               <Button
                 variant={webSearchMode ? "default" : "outline"}
@@ -185,25 +187,14 @@ export function PromptInputWithActions({
         </div>
 
         <div className="flex items-center gap-2">
-          <PromptInputAction tooltip="Select model">
-            <Select value={currentModel} onValueChange={handleModelChange}>
-              <SelectTrigger className="outline-none cursor-pointer rounded-full min-w-[180px]">
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent className="outline-none">
-                {models.length > 0 ? (
-                  models.map((model) => (
-                    <SelectItem key={model} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <SelectItem value="loading" disabled>
-                    Loading models...
-                  </SelectItem>
-                )}
-              </SelectContent>
-            </Select>
+          <PromptInputAction tooltip="Select model - View capabilities">
+            <CompactModelSelector
+              models={models}
+              value={currentModel}
+              onValueChange={handleModelChange}
+              disabled={models.length === 0}
+              className="outline-none cursor-pointer"
+            />
           </PromptInputAction>
           <PromptInputAction
             tooltip={isLoading ? "Stop generation" : "Send message"}
