@@ -56,7 +56,7 @@ import {
   BranchNext,
   BranchPage,
 } from "@/components/ai-elements/branch";
-import { MessageSquareIcon } from "lucide-react";
+import { Info, MessageSquareIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import { useAgent, type AgentSource } from "@/lib/hooks/use-agent";
@@ -692,31 +692,30 @@ export default function ChatPage() {
                                   {branch.sources &&
                                   branch.sources.length > 0 ? (
                                     <div>
-                                      {branch.metadata ? (
-                                        <ResponseMetadataHoverCard
-                                          metadata={branch.metadata}
-                                          responseContent={branch.content}
-                                          onRegenerate={() => {
-                                            const userMsg = messages[i - 1];
-                                            if (
-                                              userMsg &&
-                                              userMsg.role === "user"
-                                            ) {
-                                              handleSendMessage(
-                                                userMsg.content,
-                                                branch.metadata?.modelName ||
-                                                  model,
-                                                msg.isAgent,
-                                                branch.tool === "WebSearch",
-                                              );
-                                            }
-                                          }}
-                                        >
-                                          <Response>{branch.content}</Response>
-                                        </ResponseMetadataHoverCard>
-                                      ) : (
+                                      <div className="flex items-start gap-2">
                                         <Response>{branch.content}</Response>
-                                      )}
+                                        {branch.metadata && (
+                                          <ResponseMetadataHoverCard
+                                            metadata={branch.metadata}
+                                            responseContent={branch.content}
+                                            onRegenerate={() => {
+                                              const userMsg = messages[i - 1];
+                                              if (
+                                                userMsg &&
+                                                userMsg.role === "user"
+                                              ) {
+                                                handleSendMessage(
+                                                  userMsg.content,
+                                                  branch.metadata?.modelName ||
+                                                    model,
+                                                  msg.isAgent,
+                                                  branch.tool === "WebSearch",
+                                                );
+                                              }
+                                            }}
+                                          />
+                                        )}
+                                      </div>
                                       <InlineCitation className="mt-4">
                                         <InlineCitationText>
                                           Sources:
@@ -767,29 +766,31 @@ export default function ChatPage() {
                                         </InlineCitationCard>
                                       </InlineCitation>
                                     </div>
-                                  ) : branch.metadata ? (
-                                    <ResponseMetadataHoverCard
-                                      metadata={branch.metadata}
-                                      responseContent={branch.content}
-                                      onRegenerate={() => {
-                                        const userMsg = messages[i - 1];
-                                        if (
-                                          userMsg &&
-                                          userMsg.role === "user"
-                                        ) {
-                                          handleSendMessage(
-                                            userMsg.content,
-                                            branch.metadata?.modelName || model,
-                                            msg.isAgent,
-                                            branch.tool === "WebSearch",
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      <Response>{branch.content}</Response>
-                                    </ResponseMetadataHoverCard>
                                   ) : (
-                                    <Response>{branch.content}</Response>
+                                    <div className="flex items-start gap-2">
+                                      <Response>{branch.content}</Response>
+                                      {branch.metadata && (
+                                        <ResponseMetadataHoverCard
+                                          metadata={branch.metadata}
+                                          responseContent={branch.content}
+                                          onRegenerate={() => {
+                                            const userMsg = messages[i - 1];
+                                            if (
+                                              userMsg &&
+                                              userMsg.role === "user"
+                                            ) {
+                                              handleSendMessage(
+                                                userMsg.content,
+                                                branch.metadata?.modelName ||
+                                                  model,
+                                                msg.isAgent,
+                                                branch.tool === "WebSearch",
+                                              );
+                                            }
+                                          }}
+                                        />
+                                      )}
+                                    </div>
                                   )}
                                 </MessageContent>
                                 <MessageAvatar name="AI Assistant" src="" />
@@ -846,54 +847,58 @@ export default function ChatPage() {
                             msg.sources &&
                             msg.sources.length > 0 ? (
                               <div>
-                                {msg.metadata ? (
-                                  <ResponseMetadataHoverCard
-                                    metadata={msg.metadata}
-                                    responseContent={msg.content}
-                                    onRegenerate={() => {
-                                      const userMsg = messages[i - 1];
-                                      if (userMsg && userMsg.role === "user") {
-                                        // Add new branch instead of replacing
-                                        setMessages((prev) => {
-                                          const newMsgs = [...prev];
-                                          const assistantMsg = newMsgs[i];
-                                          if (
-                                            assistantMsg &&
-                                            assistantMsg.role === "assistant"
-                                          ) {
-                                            // Initialize branches if not exists
-                                            if (!assistantMsg.branches) {
-                                              assistantMsg.branches = [
-                                                {
-                                                  content: assistantMsg.content,
-                                                  metadata:
-                                                    assistantMsg.metadata,
-                                                  sources: assistantMsg.sources,
-                                                  tool: assistantMsg.tool,
-                                                  reasoning:
-                                                    assistantMsg.reasoning,
-                                                  reasoningDuration:
-                                                    assistantMsg.reasoningDuration,
-                                                },
-                                              ];
-                                            }
-                                          }
-                                          return newMsgs;
-                                        });
-                                        handleSendMessage(
-                                          userMsg.content,
-                                          msg.metadata?.modelName || model,
-                                          msg.isAgent,
-                                          msg.tool === "WebSearch",
-                                        );
-                                      }
-                                    }}
-                                  >
-                                    <Response>{msg.content}</Response>
-                                  </ResponseMetadataHoverCard>
-                                ) : (
+                                <div className="flex items-start gap-2">
                                   <Response>{msg.content}</Response>
-                                )}
+                                  {msg.metadata && (
+                                    <ResponseMetadataHoverCard
+                                      metadata={msg.metadata}
+                                      responseContent={msg.content}
+                                      onRegenerate={() => {
+                                        const userMsg = messages[i - 1];
+                                        if (
+                                          userMsg &&
+                                          userMsg.role === "user"
+                                        ) {
+                                          // Add new branch instead of replacing
+                                          setMessages((prev) => {
+                                            const newMsgs = [...prev];
+                                            const assistantMsg = newMsgs[i];
+                                            if (
+                                              assistantMsg &&
+                                              assistantMsg.role === "assistant"
+                                            ) {
+                                              // Initialize branches if not exists
+                                              if (!assistantMsg.branches) {
+                                                assistantMsg.branches = [
+                                                  {
+                                                    content:
+                                                      assistantMsg.content,
+                                                    metadata:
+                                                      assistantMsg.metadata,
+                                                    sources:
+                                                      assistantMsg.sources,
+                                                    tool: assistantMsg.tool,
+                                                    reasoning:
+                                                      assistantMsg.reasoning,
+                                                    reasoningDuration:
+                                                      assistantMsg.reasoningDuration,
+                                                  },
+                                                ];
+                                              }
+                                            }
+                                            return newMsgs;
+                                          });
+                                          handleSendMessage(
+                                            userMsg.content,
+                                            msg.metadata?.modelName || model,
+                                            msg.isAgent,
+                                            msg.tool === "WebSearch",
+                                          );
+                                        }
+                                      }}
+                                    />
+                                  )}
+                                </div>
                                 <InlineCitation className="mt-4">
                                   <InlineCitationText>
                                     Sources:
@@ -938,51 +943,54 @@ export default function ChatPage() {
                                   </InlineCitationCard>
                                 </InlineCitation>
                               </div>
-                            ) : msg.role === "assistant" && msg.metadata ? (
-                              <ResponseMetadataHoverCard
-                                metadata={msg.metadata}
-                                responseContent={msg.content}
-                                onRegenerate={() => {
-                                  const userMsg = messages[i - 1];
-                                  if (userMsg && userMsg.role === "user") {
-                                    // Add new branch instead of replacing
-                                    setMessages((prev) => {
-                                      const newMsgs = [...prev];
-                                      const assistantMsg = newMsgs[i];
-                                      if (
-                                        assistantMsg &&
-                                        assistantMsg.role === "assistant"
-                                      ) {
-                                        // Initialize branches if not exists
-                                        if (!assistantMsg.branches) {
-                                          assistantMsg.branches = [
-                                            {
-                                              content: assistantMsg.content,
-                                              metadata: assistantMsg.metadata,
-                                              sources: assistantMsg.sources,
-                                              tool: assistantMsg.tool,
-                                              reasoning: assistantMsg.reasoning,
-                                              reasoningDuration:
-                                                assistantMsg.reasoningDuration,
-                                            },
-                                          ];
-                                        }
-                                      }
-                                      return newMsgs;
-                                    });
-                                    handleSendMessage(
-                                      userMsg.content,
-                                      msg.metadata?.modelName || model,
-                                      msg.isAgent,
-                                      msg.tool === "WebSearch",
-                                    );
-                                  }
-                                }}
-                              >
-                                <Response>{msg.content}</Response>
-                              </ResponseMetadataHoverCard>
                             ) : (
-                              <Response>{msg.content}</Response>
+                              <div className="flex items-start gap-2">
+                                <Response>{msg.content}</Response>
+                                {msg.role === "assistant" && msg.metadata && (
+                                  <ResponseMetadataHoverCard
+                                    metadata={msg.metadata}
+                                    responseContent={msg.content}
+                                    onRegenerate={() => {
+                                      const userMsg = messages[i - 1];
+                                      if (userMsg && userMsg.role === "user") {
+                                        // Add new branch instead of replacing
+                                        setMessages((prev) => {
+                                          const newMsgs = [...prev];
+                                          const assistantMsg = newMsgs[i];
+                                          if (
+                                            assistantMsg &&
+                                            assistantMsg.role === "assistant"
+                                          ) {
+                                            // Initialize branches if not exists
+                                            if (!assistantMsg.branches) {
+                                              assistantMsg.branches = [
+                                                {
+                                                  content: assistantMsg.content,
+                                                  metadata:
+                                                    assistantMsg.metadata,
+                                                  sources: assistantMsg.sources,
+                                                  tool: assistantMsg.tool,
+                                                  reasoning:
+                                                    assistantMsg.reasoning,
+                                                  reasoningDuration:
+                                                    assistantMsg.reasoningDuration,
+                                                },
+                                              ];
+                                            }
+                                          }
+                                          return newMsgs;
+                                        });
+                                        handleSendMessage(
+                                          userMsg.content,
+                                          msg.metadata?.modelName || model,
+                                          msg.isAgent,
+                                          msg.tool === "WebSearch",
+                                        );
+                                      }
+                                    }}
+                                  />
+                                )}
+                              </div>
                             )}
                           </MessageContent>
                           <MessageAvatar
