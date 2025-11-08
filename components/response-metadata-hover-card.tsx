@@ -15,6 +15,7 @@ import {
   Database,
   Settings2,
   MapPin,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,7 +36,6 @@ interface ResponseMetadata {
 }
 
 interface ResponseMetadataHoverCardProps {
-  children: React.ReactNode;
   metadata: ResponseMetadata;
   responseContent: string;
   onRegenerate?: () => void;
@@ -43,7 +43,6 @@ interface ResponseMetadataHoverCardProps {
 }
 
 export function ResponseMetadataHoverCard({
-  children,
   metadata,
   responseContent,
   onRegenerate,
@@ -87,15 +86,21 @@ export function ResponseMetadataHoverCard({
     : null;
 
   return (
-    <HoverCard openDelay={100}>
+    <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <div className={cn("cursor-default", className)}>{children}</div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "h-6 w-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors",
+            className,
+          )}
+          aria-label="View generation metadata"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </Button>
       </HoverCardTrigger>
-      <HoverCardContent
-        side="bottom"
-        align="start"
-        className="w-80 p-3 mt-3 text-xs"
-      >
+      <HoverCardContent side="top" align="start" className="w-80 p-3 text-xs">
         <div className="space-y-3">
           {/* Model Info */}
           {metadata.modelName && (
